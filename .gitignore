@@ -1,5 +1,56 @@
+# Local environment and credentials
+.env
+.env.*
+!.env.example
+!.env.sample
+!.env.template
+!.env.*.example
+.envrc
+.direnv/
+.aws/
+.kube/
+.ssh/
+.netrc
+.pypirc
+.secrets/
+credentials.json
+secrets.json
+service-account.json
+*.key
+*.pem
+*.p12
+*.pfx
+id_rsa
+id_ed25519
+
+# Python environments, caches, and builds
 .venv/
+/venv/
 __pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+.coverage
+.coverage.*
+/htmlcov/
 *.egg-info/
 /build/
 /dist/
+
+# Inference and evaluation artifacts
+/runs/
+/outputs/
+*.log
+slurm-*.out
+slurm-*.err
+*.safetensors
+*.gguf
+*.sif
+
+# Local editor and OS files
+.ipynb_checkpoints/
+*.swp
+.DS_Store
