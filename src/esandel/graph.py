@@ -1,6 +1,7 @@
 from collections.abc import Callable, Mapping
 from typing import Literal, Self, TypedDict
 
+from langgraph.config import get_stream_writer
 from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -46,7 +47,9 @@ def build_graph(
         return {"draft": draft_model(state["query"])}
 
     def judge(state: AnswerState) -> AnswerUpdate:
-        verdict = judge_model(state["query"], state["draft"])
+        query, draft = state["query"], state["draft"]
+        get_stream_writer()({"type": "judge_started", "input": {"query": query, "draft": draft}})
+        verdict = judge_model(query, draft)
         return {"verdict": Verdict.model_validate(verdict)}
 
     def route(state: AnswerState) -> Decision:
@@ -56,12 +59,14 @@ def build_graph(
         return {"answer": state["draft"]}
 
     def tweak(state: AnswerState) -> AnswerUpdate:
+        get_stream_writer()({"type": "revision_started", "decision": "tweak"})
         answer = tweak_model(
             state["query"], state["draft"], state["verdict"].guidance
         )
         return {"answer": answer}
 
     def regenerate(state: AnswerState) -> AnswerUpdate:
+        get_stream_writer()({"type": "revision_started", "decision": "regenerate"})
         return {"answer": regenerate_model(state["query"])}
 
     builder = StateGraph(AnswerState, input_schema=QueryInput)

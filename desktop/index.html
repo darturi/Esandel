@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; base-uri 'none'; form-action 'none'">
+  <title>Esandel</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="node_modules/markdown-it/dist/browser/markdown-it.umd.min.js" defer></script>
+  <script src="renderer.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <h1>Esandel</h1>
+      <nav id="run-navigation" class="stage-links" aria-label="Run navigation" hidden>
+        <button type="button" id="answer-link" data-target="answer-heading">Answer</button>
+        <button type="button" id="reasoning-link" data-target="workflow-heading">Trace</button>
+        <button type="button" id="handoff-link" data-target="handoff-step">Judge input</button>
+        <button type="button" id="ruling-link" data-target="verdict-heading">Ruling</button>
+      </nav>
+      <span id="run-status" class="run-status" data-state="idle" role="status">Ready</span>
+    </div>
+  </header>
+
+  <main id="workspace" class="workspace" data-view="answer">
+    <form id="run-form" class="composer" novalidate>
+      <div id="question-editor">
+        <div class="question-label">
+          <label for="query">Question</label>
+          <span id="shortcut" class="meta"></span>
+        </div>
+        <textarea id="query" rows="3" placeholder="Ask a question or paste a problem…" dir="auto" required></textarea>
+      </div>
+      <div class="composer-footer">
+        <div id="question-summary" class="question-summary" hidden>
+          <span class="meta">Question</span>
+          <p id="question-preview" dir="auto"></p>
+        </div>
+        <details id="run-settings" class="run-settings">
+          <summary>Run settings</summary>
+          <fieldset id="options">
+            <label id="draft-model-choice" for="draft-model" hidden>Draft model
+              <select id="draft-model"></select>
+            </label>
+            <label id="draft-model-custom" for="draft-model-id" hidden>Draft model ID
+              <input id="draft-model-id" type="text" spellcheck="false" autocomplete="off">
+            </label>
+            <label for="draft-budget">Draft token limit
+              <input id="draft-budget" type="number" min="1" max="9007199254740991" step="1" inputmode="numeric" aria-describedby="budget-default">
+              <span id="budget-default" class="meta"></span>
+            </label>
+          </fieldset>
+        </details>
+        <div id="provider-status" class="meta" role="status">
+          <p id="run-mode">Checking live setup…</p>
+          <ul id="setup-issues" class="setup-issues" hidden></ul>
+        </div>
+        <div class="actions">
+          <button id="edit-question" type="button" class="secondary" hidden>Edit question</button>
+          <button id="stop" type="button" class="secondary" hidden>Stop</button>
+          <button id="run" type="submit" class="primary" disabled>Run question</button>
+        </div>
+      </div>
+      <p id="run-error" class="error-message" role="alert" hidden></p>
+      <button id="adjust-budget" type="button" class="secondary recovery" hidden>Adjust token limit</button>
+    </form>
+
+    <section id="results-panel" class="answer-panel" aria-labelledby="answer-heading">
+      <header class="panel-header">
+        <h2 id="answer-heading" tabindex="-1">Answer</h2>
+        <div class="answer-actions">
+          <span id="answer-route" class="meta"></span>
+          <button id="copy-answer" type="button" class="secondary" hidden>Copy answer</button>
+        </div>
+      </header>
+      <div class="answer-body">
+        <p id="answer-placeholder" class="muted">Your answer will appear here after the run.</p>
+        <div id="answer-text" class="formatted-answer" dir="auto" hidden></div>
+      </div>
+    </section>
+
+    <aside id="trace-panel" class="workflow" aria-labelledby="workflow-heading">
+      <header class="panel-header trace-header">
+        <h2 id="workflow-heading" tabindex="-1">Run trace</h2>
+        <span class="meta trace-total" title="Time since drafting started">Total <span id="trace-time">—</span></span>
+      </header>
+      <ol class="timeline">
+        <li id="draft-step" class="step" data-state="pending">
+          <div class="step-header">
+            <h3>Draft</h3>
+            <span class="step-status">Pending</span>
+            <span class="step-time"></span>
+          </div>
+          <div id="draft-body" class="step-body" hidden>
+            <p id="draft-provider" class="meta"></p>
+            <details id="reasoning" class="disclosure">
+              <summary>Draft reasoning</summary>
+              <div id="reasoning-placeholder" class="disclosure-body muted"></div>
+              <pre id="reasoning-text" class="disclosure-body code" dir="auto" hidden></pre>
+            </details>
+            <pre id="draft-text" class="model-text draft-text" dir="auto" hidden></pre>
+          </div>
+        </li>
+        <li id="handoff-step" class="step" data-state="pending" tabindex="-1">
+          <div class="step-header">
+            <h3>Sent to judge</h3>
+            <span class="step-status">Pending</span>
+            <span class="step-time"></span>
+          </div>
+          <div id="handoff-body" class="step-body" hidden>
+            <details id="judge-payload" class="disclosure">
+              <summary>Inspect judge input</summary>
+              <div class="disclosure-body judge-payload">
+                <div>
+                  <h4>Question</h4>
+                  <p id="judge-question" class="model-text payload-text" dir="auto"></p>
+                </div>
+                <div>
+                  <h4>Draft</h4>
+                  <p id="judge-draft" class="model-text payload-text" dir="auto"></p>
+                </div>
+                <button id="copy-judge" type="button" class="secondary copy-action">Copy exact JSON</button>
+                <details id="judge-raw" class="raw-payload">
+                  <summary>Raw JSON</summary>
+                  <pre id="judge-input" class="code"></pre>
+                </details>
+              </div>
+            </details>
+          </div>
+        </li>
+        <li id="judge-step" class="step" data-state="pending">
+          <div class="step-header">
+            <h3 id="verdict-heading" tabindex="-1">Judge ruling</h3>
+            <span class="step-status">Pending</span>
+            <span class="step-time"></span>
+          </div>
+          <div id="verdict-body" class="step-body" hidden>
+            <p id="rationale" class="model-text" dir="auto"></p>
+            <div id="guidance-block" class="guidance" hidden>
+              <h4>Revision guidance</h4>
+              <p id="guidance" class="model-text" dir="auto"></p>
+            </div>
+          </div>
+        </li>
+        <li id="revision-step" class="step" data-state="pending">
+          <div class="step-header">
+            <h3>Revision</h3>
+            <span class="step-status">Pending</span>
+            <span class="step-time"></span>
+          </div>
+        </li>
+      </ol>
+    </aside>
+
+    <aside id="answer-preview" class="answer-preview" aria-labelledby="answer-preview-heading" hidden>
+      <div class="answer-preview-copy">
+        <h2 id="answer-preview-heading">Answer ready</h2>
+        <p id="answer-preview-text" dir="auto"></p>
+      </div>
+      <button id="view-answer" type="button" class="primary">Read answer</button>
+    </aside>
+    <p id="copy-status" class="screen-reader-only" role="status"></p>
+  </main>
+</body>
+</html>

@@ -39,6 +39,7 @@ __pycache__/
 *.egg-info/
 /build/
 /dist/
+/desktop/node_modules/
 
 # Inference and evaluation artifacts
 /runs/
