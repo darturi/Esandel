@@ -5,12 +5,12 @@ Esandel is an LLM orchestration project for Q&A. A smaller model drafts an answe
 ## How a query is answered
 
 1. A smaller open-weight model receives the query and drafts an answer in one call with built-in reasoning where supported. The CLI's live draft defaults to Qwen3.8-27B on DeepInfra.
-2. A stronger model, such as GPT 6.2 Sol, judges the draft against the original query. It checks that factual claims are correct and that subjective answers are relevant, reasonable, and respect the caller’s stated preferences.
+2. GPT-6.2 Sol judges the draft against the original query. It checks that factual claims are correct and that subjective answers are relevant, reasonable, and respect the caller’s stated preferences. The CLI enables this with `--live-judge`.
 3. The judge accepts or rejects the draft. On rejection, it chooses how to proceed.
 
    - **Accept.** Return the draft as-is.
-   - **Tweak.** For a targeted fix, send the original query, draft, and judge’s guidance to a separate GPT 6.2 Sol instance.
-   - **Regenerate.** When the core answer needs to be redone, send only the original query to that instance.
+   - **Tweak.** For a targeted fix, send the original query, draft, and judge’s guidance to a separate GPT-6.2 Sol call.
+   - **Regenerate.** When the core answer needs to be redone, send only the original query to a fresh GPT-6.2 Sol call.
 
    A tweaked or regenerated answer goes straight to the caller.
 
@@ -36,7 +36,7 @@ Run the graph and CLI tests with `python -m unittest discover -s tests -v`.
 
 ## Run a live draft
 
-Set `DEEPINFRA_API_KEY` in your environment and add `--live-draft` to use Qwen3.8-27B. The judge and both revision paths are stubs. The default `accept` verdict returns the live draft, and `--json` shows the draft alongside the stub verdict.
+Set `DEEPINFRA_API_KEY` in your environment and add `--live-draft` to use Qwen3.8-27B. Without `--live-judge`, the stub judge defaults to `accept`. Add `--json` to inspect the original draft and verdict.
 
 ```sh
 esandel --live-draft --json "What is 2 + 2?"
@@ -54,6 +54,18 @@ esandel --live-draft --json "What is 2 + 2?"
 ```
 
 Set `ESANDEL_DRAFT_MODEL` if your server advertises a different model ID, and set `ESANDEL_DRAFT_API_KEY` if your endpoint requires bearer authentication.
+
+## Run the live judge and revision steps
+
+Set `OPENAI_API_KEY` in your environment and add `--live-judge` to have GPT-6.2 Sol evaluate the draft and handle any tweak or regeneration. Combine it with `--live-draft` to start with a real Qwen draft. `--live-judge` by itself starts with the stub draft. Use `--json` to inspect the original draft, verdict, and final answer.
+
+With both keys saved in macOS Keychain, load them only for the command. The example uses items named `EsandelOpenAI` and `esandel-deepinfra`.
+
+```sh
+OPENAI_API_KEY="$(security find-generic-password -s EsandelOpenAI -w)" \
+DEEPINFRA_API_KEY="$(security find-generic-password -s esandel-deepinfra -a "$USER" -w)" \
+  esandel --live-draft --live-judge --json "What is 2 + 2?"
+```
 
 ## Planned IMO evaluation
 

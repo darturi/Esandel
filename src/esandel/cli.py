@@ -14,6 +14,9 @@ from .draft import (
     chat_draft,
 )
 from .graph import Decision, build_graph
+from .judge import JudgeError, judge_draft
+from .openai_responses import OpenAIResponseError
+from .revision import regenerate_answer, tweak_draft
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -32,7 +35,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         default=DEFAULT_MAX_TOKENS,
         help="Output token limit for a live draft (default: %(default)s)",
     )
-    parser.add_argument(
+    judge_options = parser.add_mutually_exclusive_group()
+    judge_options.add_argument(
+        "--live-judge", action="store_true", help="Use GPT-6.2 Sol to judge and revise the draft"
+    )
+    judge_options.add_argument(
         "--stub-decision",
         choices=get_args(Decision),
         default="accept",
@@ -66,16 +73,31 @@ def main(argv: Sequence[str] | None = None) -> int:
             api_key=api_key,
         )
 
+    judge_model = partial(stubs.judge, decision=args.stub_decision)
+    tweak_model: Callable[[str, str, str], str] = stubs.tweak
+    regenerate_model: Callable[[str], str] = stubs.regenerate
+    if args.live_judge:
+        openai_api_key = os.environ.get("OPENAI_API_KEY", "").strip()
+        if not openai_api_key:
+            parser.error("set OPENAI_API_KEY to use the live judge")
+        judge_model = partial(judge_draft, api_key=openai_api_key)
+        tweak_model = partial(tweak_draft, api_key=openai_api_key)
+        regenerate_model = partial(regenerate_answer, api_key=openai_api_key)
+
     graph = build_graph(
         draft_model=draft_model,
-        judge_model=partial(stubs.judge, decision=args.stub_decision),
-        tweak_model=stubs.tweak,
-        regenerate_model=stubs.regenerate,
+        judge_model=judge_model,
+        tweak_model=tweak_model,
+        regenerate_model=regenerate_model,
     )
     try:
         result = graph.invoke({"query": args.query})
     except DraftError as error:
         parser.exit(1, f"esandel: draft failed. {error}\n")
+    except JudgeError as error:
+        parser.exit(1, f"esandel: judge failed. {error}\n")
+    except OpenAIResponseError as error:
+        parser.exit(1, f"esandel: revision failed. {error}\n")
 
     if args.json:
         print(json.dumps({**result, "verdict": result["verdict"].model_dump()}))
