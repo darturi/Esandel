@@ -78,7 +78,9 @@ npm --prefix desktop start
 
 The desktop app uses your live draft endpoint and GPT‑6.2 Sol for review. Launch it from the terminal where you configured the provider credentials and endpoint settings. The question pane shows any missing configuration before you run.
 
-Enter a question and select **Run question**. The **Answer** pane is beside **Run trace**. **Judge input** highlights when the draft is sent. Select it to inspect the question and draft or copy the exact JSON. On narrow windows, the trace opens during the run and the answer preview appears when the run finishes. Select **Read answer** for the full response.
+Enter a question and select **Run question**. The **Generation** card opens **Draft**, then **Judge**, **Revision** when needed, and **Final answer**. Reopen a completed phase to inspect it. **Inspect judge input** in the Judge phase shows the question and draft sent for review and lets you copy the exact JSON.
+
+Drafts and revisions stream into the open phase. The app typesets inline math written as `$...$` or `\(...\)` and display math written as `$$...$$` or `\[...\]`. **Copy answer** copies the original Markdown and LaTeX.
 
 Open **Run settings → Draft model** to switch between Qwen3.8-27B and Gemma 3 4B on DeepInfra. Use Gemma 3 4B with a challenging problem to exercise the judge’s revision paths. With a custom draft endpoint, **Draft model ID** lets you enter a model served by that endpoint.
 

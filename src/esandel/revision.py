@@ -1,4 +1,5 @@
 import json
+from collections.abc import Callable
 
 from .openai_responses import response_text
 
@@ -10,13 +11,23 @@ revised answer.
 """
 
 
-def tweak_draft(query: str, draft: str, guidance: str, *, api_key: str) -> str:
+def tweak_draft(
+    query: str,
+    draft: str,
+    guidance: str,
+    *,
+    api_key: str,
+    on_delta: Callable[[str], None] | None = None,
+) -> str:
     return response_text(
         json.dumps({"query": query, "draft": draft, "guidance": guidance}, ensure_ascii=False),
         api_key=api_key,
         instructions=TWEAK_INSTRUCTIONS,
+        on_delta=on_delta,
     )
 
 
-def regenerate_answer(query: str, *, api_key: str) -> str:
-    return response_text(query, api_key=api_key)
+def regenerate_answer(
+    query: str, *, api_key: str, on_delta: Callable[[str], None] | None = None
+) -> str:
+    return response_text(query, api_key=api_key, on_delta=on_delta)

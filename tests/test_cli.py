@@ -282,6 +282,70 @@ class LiveOpenAICliTests(unittest.TestCase):
             },
         )
 
+    def run_live_revision_stream(self, decision: str, *chunks: dict):
+        os.environ["OPENAI_API_KEY"] = "judge-test-key"
+        verdict = {
+            "decision": decision,
+            "rationale": "Wrong sum.",
+            "guidance": "Use 4." if decision == "tweak" else "",
+        }
+        self.post.return_value = self.openai_reply(json.dumps(verdict))
+        response = httpx.Response(
+            200,
+            request=httpx.Request("POST", self.endpoint),
+            headers={"Content-Type": "text/event-stream"},
+            text="".join(f"data: {json.dumps(chunk)}\n\n" for chunk in chunks),
+        )
+        stdout, stderr = StringIO(), StringIO()
+        with patch("httpx.stream") as stream, redirect_stdout(stdout), redirect_stderr(stderr):
+            stream.return_value.__enter__.return_value = response
+            try:
+                status = main(["--events", "--live-judge", self.query])
+            except SystemExit as error:
+                status = error.code
+
+        self.post.assert_called_once()
+        self.assertNotIn("stream", self.post.call_args.kwargs["json"])
+        stream.assert_called_once()
+        self.assertEqual(stream.call_args.args, ("POST", self.endpoint))
+        self.assertTrue(stream.call_args.kwargs["json"]["stream"])
+        return status, [json.loads(line) for line in stdout.getvalue().splitlines()], stderr.getvalue()
+
+    def test_streams_revision_text_before_the_completed_answer(self):
+        for decision in ("tweak", "regenerate"):
+            with self.subTest(decision=decision):
+                self.post.reset_mock()
+                answer = "The answer is $4$."
+                status, events, stderr = self.run_live_revision_stream(
+                    decision,
+                    {"type": "response.in_progress"},
+                    {"type": "response.output_text.delta", "delta": "The answer "},
+                    {"type": "response.output_text.delta", "delta": "is $4$."},
+                    {"type": "response.completed", "response": self.openai_reply(answer).json()},
+                )
+
+                self.assertEqual((status, stderr), (0, ""))
+                revision_events = events[4:]
+                self.assertEqual(
+                    [event["type"] for event in revision_events],
+                    ["revision_started", "revision_delta", "revision_delta", "final_answer"],
+                )
+                self.assertEqual(revision_events[0]["decision"], decision)
+                self.assertEqual("".join(event["text"] for event in revision_events[1:3]), answer)
+                self.assertEqual(revision_events[-1]["answer"], answer)
+
+    def test_incomplete_revision_stream_keeps_deltas_without_a_final_answer(self):
+        status, events, stderr = self.run_live_revision_stream(
+            "regenerate",
+            {"type": "response.output_text.delta", "delta": "Partial answer"},
+            {"type": "response.incomplete"},
+        )
+
+        self.assertEqual(status, 1)
+        self.assertIn("revision failed. OpenAI did not complete", stderr)
+        self.assertEqual([event["type"] for event in events[4:]], ["revision_started", "revision_delta"])
+        self.assertEqual(events[-1]["text"], "Partial answer")
+
     def test_live_tweak_receives_the_original_query_draft_and_guidance(self):
         os.environ.update(
             {"OPENAI_API_KEY": "judge-test-key", "DEEPINFRA_API_KEY": "draft-test-key"}

@@ -1,8 +1,10 @@
 import json
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterable
 from typing import Literal
 
 import httpx
+
+from .sse import sse_data
 
 DEEPINFRA_BASE_URL = "https://api.deepinfra.com/v1/openai"
 DEFAULT_MODEL = "Qwen/Qwen3.8-27B"
@@ -74,21 +76,11 @@ def _completed_draft(response: httpx.Response, on_delta: DraftDelta | None = Non
     return answer
 
 
-def _sse_data(lines: Iterable[str]) -> Iterator[str]:
-    data: list[str] = []
-    for line in lines:
-        if not line and data:
-            yield "\n".join(data)
-            data.clear()
-        elif line.startswith("data:"):
-            data.append(line.removeprefix("data:").removeprefix(" "))
-
-
 def _streamed_draft(lines: Iterable[str], on_delta: DraftDelta) -> str:
     answer: list[str] = []
     finish_reason = None
     try:
-        for data in _sse_data(lines):
+        for data in sse_data(lines):
             if data == "[DONE]":
                 break
             chunk = json.loads(data)

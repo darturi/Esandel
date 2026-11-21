@@ -7,21 +7,20 @@ const draftModelId = byId('draft-model-id');
 const draftBudget = byId('draft-budget');
 const runButton = byId('run');
 const stopButton = byId('stop');
+const runRecovery = byId('run-recovery');
 const errorMessage = byId('run-error');
 const reasoning = byId('reasoning');
 const reasoningText = byId('reasoning-text');
 const reasoningPlaceholder = byId('reasoning-placeholder');
 const judgePayload = byId('judge-payload');
-const handoffLink = byId('handoff-link');
-const answerLink = byId('answer-link');
 const answerText = byId('answer-text');
-const answerPlaceholder = byId('answer-placeholder');
-const answerPreview = byId('answer-preview');
+const streamedAnswers = {
+  draft: { element: byId('draft-text'), source: '' },
+  revision: { element: byId('revision-text'), source: '' },
+};
 const settings = byId('run-settings');
-const workspace = byId('workspace');
-const compact = window.matchMedia('(max-width: 820px)');
-const stageLinks = document.querySelectorAll('.stage-links button');
-const stepNames = ['draft', 'handoff', 'judge', 'revision'];
+const stepNames = ['draft', 'judge', 'revision', 'answer'];
+const steps = Object.fromEntries(stepNames.map((name) => [name, byId(name + '-step')]));
 const labels = { accept: 'Accept', tweak: 'Tweak', regenerate: 'Regenerate' };
 const routes = { accept: 'Original draft', tweak: 'Revised draft', regenerate: 'Regenerated' };
 const setupMessages = {
@@ -31,6 +30,20 @@ const setupMessages = {
   judge_key_missing: 'Set OPENAI_API_KEY in your terminal and relaunch Esandel.',
 };
 const markdown = window.markdownit({ html: false, breaks: true });
+markdown.use(window.mdItPluginTex.tex, {
+  delimiters: 'all',
+  mathFence: true,
+  render(source, displayMode) {
+    let markup;
+    try {
+      markup = window.katex.renderToString(source, { displayMode, output: 'mathml', trust: false });
+    } catch (error) {
+      if (!(error instanceof window.katex.ParseError)) throw error;
+      markup = '<code>' + markdown.utils.escapeHtml(source) + '</code>';
+    }
+    return displayMode ? '<div class="math-display">' + markup + '</div>' : markup;
+  },
+});
 markdown.renderer.rules.link_open = () => '';
 markdown.renderer.rules.link_close = () => '';
 markdown.renderer.rules.image = (tokens, index) => markdown.utils.escapeHtml(tokens[index].content);
@@ -50,17 +63,18 @@ function setStatus(state, text) {
   status.textContent = text;
 }
 
-function setCurrentStage(id) {
-  for (const button of stageLinks) {
-    if (button.id === id) button.setAttribute('aria-current', 'step');
-    else button.removeAttribute('aria-current');
-  }
-}
-
 function setStep(name, state, label) {
-  const step = byId(name + '-step');
+  const step = steps[name];
   step.dataset.state = state;
   step.querySelector('.step-status').textContent = label;
+  const summary = step.firstElementChild;
+  if (state === 'pending' || state === 'unreached') {
+    summary.setAttribute('aria-disabled', 'true');
+    summary.tabIndex = -1;
+  } else {
+    summary.removeAttribute('aria-disabled');
+    summary.removeAttribute('tabindex');
+  }
 }
 
 function formatDuration(milliseconds) {
@@ -69,7 +83,7 @@ function formatDuration(milliseconds) {
 }
 
 function setStepTime(name, text) {
-  byId(name + '-step').querySelector('.step-time').textContent = text;
+  steps[name].querySelector('.step-time').textContent = text;
 }
 
 function refreshTraceTime() {
@@ -105,43 +119,31 @@ function finishTraceTiming(elapsed) {
   byId('trace-time').textContent = formatDuration(elapsed ?? performance.now() - traceOrigin);
 }
 
-function setView(view) {
-  workspace.dataset.view = view;
-}
+function openStep(name) {
+  const step = steps[name];
+  const previous = Object.values(steps).find((candidate) => candidate.open);
+  const focused = document.activeElement;
+  const summary = step.firstElementChild;
+  const focusWillBeHidden = previous && previous !== step && previous.contains(focused)
+    && !previous.firstElementChild.contains(focused);
 
-function scrollToSection(section) {
-  const trace = section.closest('#trace-panel');
-  if (trace && !compact.matches) {
-    const header = trace.querySelector('.trace-header');
-    const offset = section.getBoundingClientRect().top - trace.getBoundingClientRect().top;
-    trace.scrollTo({ top: section === byId('workflow-heading') ? 0 : trace.scrollTop + offset - header.offsetHeight - 12 });
-    return;
+  step.open = true;
+  if (focusWillBeHidden) summary.focus({ preventScroll: true });
+
+  const bounds = summary.getBoundingClientRect();
+  const headerBottom = document.querySelector('.topbar').getBoundingClientRect().bottom;
+  // Bring the new phase into view without moving an already visible phase.
+  if (bounds.top < headerBottom || bounds.bottom + 96 > window.innerHeight) {
+    window.scrollBy({ top: bounds.top - headerBottom - 12 });
   }
-  const chromeHeight = document.querySelector('.topbar').offsetHeight;
-  const top = section.getBoundingClientRect().top + window.scrollY - chromeHeight - 16;
-  window.scrollTo({ top: Math.max(0, top) });
 }
 
-function clearHandoffHighlight() {
-  delete handoffLink.dataset.unread;
-  handoffLink.removeAttribute('aria-label');
-}
-
-for (const button of stageLinks) {
-  button.addEventListener('click', () => {
-    const target = byId(button.dataset.target);
-    if (compact.matches) setView(button === answerLink ? 'answer' : 'trace');
-    if (button === handoffLink && !byId('handoff-body').hidden) judgePayload.open = true;
-    scrollToSection(target);
-    target.focus({ preventScroll: true });
+for (const step of Object.values(steps)) {
+  const summary = step.firstElementChild;
+  summary.addEventListener('click', (event) => {
+    if (summary.hasAttribute('aria-disabled')) event.preventDefault();
   });
 }
-
-byId('view-answer').addEventListener('click', () => answerLink.click());
-
-judgePayload.addEventListener('toggle', () => {
-  if (judgePayload.open) clearHandoffHighlight();
-});
 
 function selectedDraftModel() {
   if (typeof config?.draftModel !== 'string') return null;
@@ -207,39 +209,38 @@ function setRunning(value) {
 
 function resetTimeline() {
   for (const name of stepNames) {
+    steps[name].open = false;
     setStep(name, 'pending', 'Pending');
     setStepTime(name, '');
   }
   byId('trace-time').textContent = '—';
-  for (const id of ['draft-body', 'handoff-body', 'verdict-body', 'guidance-block', 'draft-text',
-    'reasoning-text', 'answer-text', 'answer-preview', 'copy-answer', 'run-error', 'adjust-budget']) {
+  for (const id of ['draft-output', 'verdict-body', 'guidance-block', 'reasoning-text', 'revision-text',
+    'run-recovery', 'adjust-budget']) {
     byId(id).hidden = true;
   }
-  for (const id of ['draft-text', 'reasoning-text', 'judge-input', 'judge-question', 'judge-draft',
-    'rationale', 'guidance', 'answer-text', 'answer-route', 'copy-status']) {
+  for (const output of Object.values(streamedAnswers)) {
+    cancelOutputRender(output);
+    output.source = '';
+    output.element.replaceChildren();
+  }
+  for (const id of ['reasoning-text', 'judge-input', 'judge-question', 'judge-draft',
+    'rationale', 'guidance', 'revision-note', 'answer-text', 'copy-status']) {
     byId(id).textContent = '';
   }
   answerSource = '';
   byId('copy-answer').textContent = 'Copy answer';
   byId('copy-judge').textContent = 'Copy exact JSON';
-  delete byId('judge-step').dataset.decision;
-  delete answerLink.dataset.ready;
-  answerLink.textContent = 'Answer';
-  setView('trace');
-  clearHandoffHighlight();
-  setCurrentStage('reasoning-link');
+  delete steps.judge.dataset.decision;
   reasoning.open = false;
   judgePayload.open = false;
   byId('judge-raw').open = false;
   reasoningPlaceholder.hidden = false;
   reasoningPlaceholder.textContent = 'Waiting for reasoning from the endpoint…';
-  answerPlaceholder.hidden = false;
-  answerPlaceholder.textContent = 'Waiting for the run to finish…';
 }
 
 function markUnreachedSteps() {
   for (const name of stepNames) {
-    if (byId(name + '-step').dataset.state === 'pending') setStep(name, 'skipped', 'Did not run');
+    if (steps[name].dataset.state === 'pending') setStep(name, 'unreached', 'Did not run');
   }
 }
 
@@ -248,10 +249,9 @@ function showFailure(message, draftLimitReached = false) {
   errorMessage.textContent = draftLimitReached
     ? 'The draft reached its token limit. Raise the limit or shorten the question, then run again.'
     : message;
-  errorMessage.hidden = false;
+  runRecovery.hidden = false;
   byId('adjust-budget').hidden = !draftLimitReached;
   setStatus('error', 'Failed');
-  if (answerText.hidden) answerPlaceholder.textContent = 'The run ended before returning an answer.';
 }
 
 function appendText(element, value) {
@@ -262,20 +262,33 @@ function appendText(element, value) {
   if (follow) element.scrollTop = element.scrollHeight;
 }
 
+function cancelOutputRender(output) {
+  window.clearTimeout(output.renderTimer);
+  output.renderTimer = undefined;
+}
+
+function renderOutput(output, source = output.source) {
+  cancelOutputRender(output);
+  output.source = source;
+  const { element } = output;
+  const scrollTop = element.scrollTop;
+  const follow = element.scrollHeight - scrollTop - element.clientHeight < 12;
+  element.innerHTML = markdown.render(source);
+  element.hidden = false;
+  element.scrollTop = follow ? element.scrollHeight : scrollTop;
+}
+
+function appendOutput(output, delta) {
+  output.source += delta;
+  // Batch rapid tokens because a delimiter can complete math from an earlier chunk.
+  output.renderTimer ??= window.setTimeout(() => renderOutput(output), 75);
+}
+
 function showAnswer(event) {
-  byId('answer-route').textContent = routes[event.decision];
-  answerPlaceholder.hidden = true;
   answerSource = event.answer;
   answerText.innerHTML = markdown.render(answerSource);
-  answerText.hidden = false;
-  byId('copy-answer').hidden = false;
-
-  const previewText = answerText.querySelector('p, li')?.textContent.trim() || answerText.textContent.trim();
-  byId('answer-preview-text').textContent = previewText.replace(/\s+/g, ' ').slice(0, 480);
-  answerPreview.hidden = false;
-  answerLink.textContent = 'Read answer';
-  answerLink.dataset.ready = 'true';
-  setCurrentStage('answer-link');
+  setStep('answer', 'done', routes[event.decision]);
+  openStep('answer');
 }
 
 function handleEvent(event) {
@@ -285,7 +298,7 @@ function handleEvent(event) {
       setStep('draft', 'running', 'Generating');
       startStepTiming('draft', elapsed);
       byId('draft-provider').textContent = event.model;
-      byId('draft-body').hidden = false;
+      openStep('draft');
       setStatus('running', 'Drafting');
       break;
     case 'reasoning_delta':
@@ -296,63 +309,70 @@ function handleEvent(event) {
       appendText(reasoningText, event.text);
       break;
     case 'draft_delta':
-      appendText(byId('draft-text'), event.text);
+      byId('draft-output').hidden = false;
+      appendOutput(streamedAnswers.draft, event.text);
       break;
-    case 'draft_completed': {
+    case 'draft_completed':
       finishStepTiming(elapsed);
       setStep('draft', 'done', 'Completed');
-      const draftText = byId('draft-text');
-      if (draftText.textContent !== event.draft) draftText.textContent = event.draft;
-      draftText.hidden = false;
+      byId('draft-output').hidden = false;
+      renderOutput(streamedAnswers.draft, event.draft);
       if (reasoningText.hidden) {
         reasoningPlaceholder.textContent = 'The endpoint returned draft text only.';
       }
       break;
-    }
     case 'judge_started':
-      setStep('handoff', 'done', 'GPT‑6.2 Sol');
-      setStepTime('handoff', 'At ' + formatDuration(elapsed));
+      byId('handoff-time').textContent = 'at ' + formatDuration(elapsed);
       byId('judge-input').textContent = JSON.stringify(event.input, null, 2);
       byId('judge-question').textContent = event.input.query;
       byId('judge-draft').textContent = event.input.draft;
-      byId('handoff-body').hidden = false;
-      handoffLink.dataset.unread = 'true';
-      handoffLink.setAttribute('aria-label', 'Judge input, draft sent');
-      setCurrentStage('handoff-link');
       setStep('judge', 'running', 'Reviewing');
       startStepTiming('judge', elapsed);
+      openStep('judge');
       setStatus('running', 'Draft sent to judge');
       break;
     case 'verdict':
       finishStepTiming(elapsed);
       setStep('judge', 'done', labels[event.decision]);
-      byId('judge-step').dataset.decision = event.decision;
+      steps.judge.dataset.decision = event.decision;
       byId('rationale').textContent = event.rationale;
       byId('guidance').textContent = event.guidance;
       byId('guidance-block').hidden = !event.guidance;
       byId('verdict-body').hidden = false;
-      setCurrentStage('ruling-link');
       setStatus('running', 'Judge ruling · ' + labels[event.decision]);
       break;
-    case 'revision_started':
-      setStep('revision', 'running', event.decision === 'tweak' ? 'Applying guidance' : 'Regenerating');
+    case 'revision_started': {
+      const tweaking = event.decision === 'tweak';
+      setStep('revision', 'running', tweaking ? 'Applying guidance' : 'Regenerating');
+      byId('revision-note').textContent = tweaking ? byId('guidance').textContent
+        : 'Writing a fresh answer from the original question.';
       startStepTiming('revision', elapsed);
-      setCurrentStage('answer-link');
-      setStatus('running', event.decision === 'tweak' ? 'Revising the draft' : 'Writing a fresh answer');
+      openStep('revision');
+      setStatus('running', tweaking ? 'Revising the draft' : 'Writing a fresh answer');
+      break;
+    }
+    case 'revision_delta':
+      appendOutput(streamedAnswers.revision, event.text);
       break;
     case 'final_answer':
       finishTraceTiming(elapsed);
       setStep('revision', event.decision === 'accept' ? 'skipped' : 'done',
         event.decision === 'accept' ? 'Skipped' : 'Completed');
+      if (event.decision === 'accept') byId('revision-note').textContent = 'The judge accepted the draft.';
+      if (event.decision === 'regenerate') byId('revision-note').textContent = 'A fresh answer was written from the original question.';
+      if (event.decision !== 'accept') renderOutput(streamedAnswers.revision, event.answer);
       showAnswer(event);
       break;
     case 'closed': {
       finishTraceTiming();
+      for (const output of Object.values(streamedAnswers)) {
+        if (output.renderTimer !== undefined) renderOutput(output);
+      }
       const restoreFocus = document.activeElement === stopButton
         || (event.outcome === 'stopped' && document.activeElement === document.body);
       setRunning(false);
       if (restoreFocus) (runButton.disabled ? byId('edit-question') : runButton).focus({ preventScroll: true });
-      const activeStep = stepNames.find((name) => byId(name + '-step').dataset.state === 'running');
+      const activeStep = stepNames.find((name) => steps[name].dataset.state === 'running');
       if (activeStep === 'draft' && reasoningText.hidden) {
         reasoningPlaceholder.textContent = 'The draft ended before any reasoning arrived.';
       }
@@ -362,7 +382,6 @@ function handleEvent(event) {
         setStatus('idle', 'Stopped');
         if (activeStep) setStep(activeStep, 'skipped', 'Stopped');
         markUnreachedSteps();
-        if (answerText.hidden) answerPlaceholder.textContent = 'The run was stopped.';
       } else {
         if (activeStep) setStep(activeStep, 'error', 'Failed');
         showFailure(event.message, event.draftLimitReached);
@@ -410,9 +429,9 @@ form.addEventListener('submit', async (event) => {
     return;
   }
 
-  const moveFocus = form.contains(document.activeElement);
+  const focused = document.activeElement;
+  const moveFocus = form.contains(focused) || focused.closest('.step');
   resetTimeline();
-  byId('run-navigation').hidden = false;
   byId('question-preview').textContent = query.value.trim();
   showEditor(false);
   setRunning(true);
@@ -439,7 +458,7 @@ stopButton.addEventListener('click', async () => {
     await window.esandel.stop();
   } catch (error) {
     errorMessage.textContent = error.message;
-    errorMessage.hidden = false;
+    runRecovery.hidden = false;
   } finally {
     stopButton.removeAttribute('aria-disabled');
   }

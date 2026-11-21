@@ -7,23 +7,19 @@
   <title>Esandel</title>
   <link rel="stylesheet" href="styles.css">
   <script src="node_modules/markdown-it/dist/browser/markdown-it.umd.min.js" defer></script>
+  <script src="node_modules/katex/dist/katex.min.js" defer></script>
+  <script src="node_modules/@mdit/plugin-tex/dist/cdn.umd.js" defer></script>
   <script src="renderer.js" defer></script>
 </head>
 <body>
   <header class="topbar">
     <div class="topbar-inner">
       <h1>Esandel</h1>
-      <nav id="run-navigation" class="stage-links" aria-label="Run navigation" hidden>
-        <button type="button" id="answer-link" data-target="answer-heading">Answer</button>
-        <button type="button" id="reasoning-link" data-target="workflow-heading">Trace</button>
-        <button type="button" id="handoff-link" data-target="handoff-step">Judge input</button>
-        <button type="button" id="ruling-link" data-target="verdict-heading">Ruling</button>
-      </nav>
       <span id="run-status" class="run-status" data-state="idle" role="status">Ready</span>
     </div>
   </header>
 
-  <main id="workspace" class="workspace" data-view="answer">
+  <main class="workspace">
     <form id="run-form" class="composer" novalidate>
       <div id="question-editor">
         <div class="question-label">
@@ -62,104 +58,102 @@
           <button id="run" type="submit" class="primary" disabled>Run question</button>
         </div>
       </div>
-      <p id="run-error" class="error-message" role="alert" hidden></p>
-      <button id="adjust-budget" type="button" class="secondary recovery" hidden>Adjust token limit</button>
     </form>
 
-    <section id="results-panel" class="answer-panel" aria-labelledby="answer-heading">
-      <header class="panel-header">
-        <h2 id="answer-heading" tabindex="-1">Answer</h2>
-        <div class="answer-actions">
-          <span id="answer-route" class="meta"></span>
-          <button id="copy-answer" type="button" class="secondary" hidden>Copy answer</button>
-        </div>
-      </header>
-      <div class="answer-body">
-        <p id="answer-placeholder" class="muted">Your answer will appear here after the run.</p>
-        <div id="answer-text" class="formatted-answer" dir="auto" hidden></div>
-      </div>
-    </section>
-
-    <aside id="trace-panel" class="workflow" aria-labelledby="workflow-heading">
-      <header class="panel-header trace-header">
-        <h2 id="workflow-heading" tabindex="-1">Run trace</h2>
+    <section class="run-card" aria-labelledby="workflow-heading">
+      <header class="run-card-header">
+        <h2 id="workflow-heading">Generation</h2>
         <span class="meta trace-total" title="Time since drafting started">Total <span id="trace-time">—</span></span>
       </header>
-      <ol class="timeline">
-        <li id="draft-step" class="step" data-state="pending">
-          <div class="step-header">
-            <h3>Draft</h3>
-            <span class="step-status">Pending</span>
-            <span class="step-time"></span>
+      <div id="run-recovery" class="run-recovery" hidden>
+        <p id="run-error" class="error-message" role="alert"></p>
+        <button id="adjust-budget" type="button" class="secondary recovery" hidden>Adjust token limit</button>
+      </div>
+
+      <details id="draft-step" class="step" name="generation-phase" data-state="pending">
+        <summary class="step-heading" aria-disabled="true" tabindex="-1">
+          <span class="step-label">Draft</span>
+          <span class="step-status">Pending</span>
+          <span class="step-time"></span>
+        </summary>
+        <div class="step-body">
+          <p id="draft-provider" class="meta"></p>
+          <div id="draft-output" hidden>
+            <h3>Draft answer</h3>
+            <div id="draft-text" class="formatted-answer streamed-answer" dir="auto"></div>
           </div>
-          <div id="draft-body" class="step-body" hidden>
-            <p id="draft-provider" class="meta"></p>
-            <details id="reasoning" class="disclosure">
-              <summary>Draft reasoning</summary>
-              <div id="reasoning-placeholder" class="disclosure-body muted"></div>
-              <pre id="reasoning-text" class="disclosure-body code" dir="auto" hidden></pre>
-            </details>
-            <pre id="draft-text" class="model-text draft-text" dir="auto" hidden></pre>
-          </div>
-        </li>
-        <li id="handoff-step" class="step" data-state="pending" tabindex="-1">
-          <div class="step-header">
-            <h3>Sent to judge</h3>
-            <span class="step-status">Pending</span>
-            <span class="step-time"></span>
-          </div>
-          <div id="handoff-body" class="step-body" hidden>
-            <details id="judge-payload" class="disclosure">
-              <summary>Inspect judge input</summary>
-              <div class="disclosure-body judge-payload">
-                <div>
-                  <h4>Question</h4>
-                  <p id="judge-question" class="model-text payload-text" dir="auto"></p>
-                </div>
-                <div>
-                  <h4>Draft</h4>
-                  <p id="judge-draft" class="model-text payload-text" dir="auto"></p>
-                </div>
-                <button id="copy-judge" type="button" class="secondary copy-action">Copy exact JSON</button>
-                <details id="judge-raw" class="raw-payload">
-                  <summary>Raw JSON</summary>
-                  <pre id="judge-input" class="code"></pre>
-                </details>
+          <details id="reasoning" class="disclosure">
+            <summary>Draft reasoning</summary>
+            <p id="reasoning-placeholder" class="disclosure-body muted"></p>
+            <pre id="reasoning-text" class="disclosure-body code" dir="auto" hidden></pre>
+          </details>
+        </div>
+      </details>
+
+      <details id="judge-step" class="step" name="generation-phase" data-state="pending">
+        <summary class="step-heading" aria-disabled="true" tabindex="-1">
+          <span class="step-label">Judge</span>
+          <span class="step-status">Pending</span>
+          <span class="step-time"></span>
+        </summary>
+        <div class="step-body">
+          <p class="meta">Sent to GPT‑6.2 Sol <span id="handoff-time"></span></p>
+          <details id="judge-payload" class="disclosure">
+            <summary>Inspect judge input</summary>
+            <div class="disclosure-body judge-payload">
+              <div>
+                <h3>Question</h3>
+                <p id="judge-question" class="model-text payload-text" dir="auto"></p>
               </div>
-            </details>
-          </div>
-        </li>
-        <li id="judge-step" class="step" data-state="pending">
-          <div class="step-header">
-            <h3 id="verdict-heading" tabindex="-1">Judge ruling</h3>
-            <span class="step-status">Pending</span>
-            <span class="step-time"></span>
-          </div>
-          <div id="verdict-body" class="step-body" hidden>
-            <p id="rationale" class="model-text" dir="auto"></p>
-            <div id="guidance-block" class="guidance" hidden>
-              <h4>Revision guidance</h4>
+              <div>
+                <h3>Draft</h3>
+                <p id="judge-draft" class="model-text payload-text" dir="auto"></p>
+              </div>
+              <button id="copy-judge" type="button" class="secondary copy-action">Copy exact JSON</button>
+              <details id="judge-raw" class="raw-payload">
+                <summary>Raw JSON</summary>
+                <pre id="judge-input" class="code"></pre>
+              </details>
+            </div>
+          </details>
+          <div id="verdict-body" class="verdict-body" hidden>
+            <div>
+              <h3>Rationale</h3>
+              <p id="rationale" class="model-text" dir="auto"></p>
+            </div>
+            <div id="guidance-block" hidden>
+              <h3>Revision guidance</h3>
               <p id="guidance" class="model-text" dir="auto"></p>
             </div>
           </div>
-        </li>
-        <li id="revision-step" class="step" data-state="pending">
-          <div class="step-header">
-            <h3>Revision</h3>
-            <span class="step-status">Pending</span>
-            <span class="step-time"></span>
-          </div>
-        </li>
-      </ol>
-    </aside>
+        </div>
+      </details>
 
-    <aside id="answer-preview" class="answer-preview" aria-labelledby="answer-preview-heading" hidden>
-      <div class="answer-preview-copy">
-        <h2 id="answer-preview-heading">Answer ready</h2>
-        <p id="answer-preview-text" dir="auto"></p>
-      </div>
-      <button id="view-answer" type="button" class="primary">Read answer</button>
-    </aside>
+      <details id="revision-step" class="step" name="generation-phase" data-state="pending">
+        <summary class="step-heading" aria-disabled="true" tabindex="-1">
+          <span class="step-label">Revision</span>
+          <span class="step-status">Pending</span>
+          <span class="step-time"></span>
+        </summary>
+        <div class="step-body">
+          <p id="revision-note" class="model-text" dir="auto"></p>
+          <div id="revision-text" class="formatted-answer streamed-answer" dir="auto" hidden></div>
+        </div>
+      </details>
+
+      <details id="answer-step" class="step" name="generation-phase" data-state="pending">
+        <summary class="step-heading" aria-disabled="true" tabindex="-1">
+          <span class="step-label">Final answer</span>
+          <span id="answer-route" class="step-status">Pending</span>
+          <span class="step-time"></span>
+        </summary>
+        <div class="step-body answer-body">
+          <div id="answer-text" class="formatted-answer" dir="auto"></div>
+          <button id="copy-answer" type="button" class="secondary copy-action">Copy answer</button>
+        </div>
+      </details>
+    </section>
+
     <p id="copy-status" class="screen-reader-only" role="status"></p>
   </main>
 </body>

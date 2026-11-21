@@ -120,6 +120,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     def draft_delta(kind: Literal["reasoning", "draft"], text: str) -> None:
         get_stream_writer()({"type": f"{kind}_delta", "text": text})
 
+    def revision_delta(text: str) -> None:
+        get_stream_writer()({"type": "revision_delta", "text": text})
+
     draft_model: Callable[[str], str] = stubs.draft
     model = "Stub draft"
     if args.live_draft:
@@ -150,8 +153,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         if not openai_api_key:
             parser.error("set OPENAI_API_KEY to use the live judge")
         judge_model = partial(judge_draft, api_key=openai_api_key)
-        tweak_model = partial(tweak_draft, api_key=openai_api_key)
-        regenerate_model = partial(regenerate_answer, api_key=openai_api_key)
+        on_revision_delta = revision_delta if args.events else None
+        tweak_model = partial(tweak_draft, api_key=openai_api_key, on_delta=on_revision_delta)
+        regenerate_model = partial(
+            regenerate_answer, api_key=openai_api_key, on_delta=on_revision_delta
+        )
 
     graph = build_graph(
         draft_model=draft_model,
